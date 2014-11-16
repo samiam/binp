@@ -1,0 +1,40 @@
+#!/usr/bin/perl
+#
+# bogus_links.pl
+#
+# Find and removes bogus links from a directory.
+#
+#########################################################################
+
+
+use Getopt::Std;
+use File::Find;
+
+getopts ('hr');
+
+if ($#ARGV < 0 || $opt_h ) {
+   print "Usage: $0 [-r] directory\n";
+   print "       Finds bogus symlinks in a directory and ";
+   print "optionally removes them (-r).\n";
+   exit (1);
+}
+
+
+foreach (@ARGV) {
+   find (\&wanted, $_);
+}
+
+sub wanted {
+    
+    -l and not -e and do {
+
+	my $link = readlink || die "Unable to read link $_: $!\n";
+	print "$File::Find::name -> $link";
+
+	if ($opt_r) {
+	    unlink $_ || do { warn "Can't remove $_: $!\n"; sleep 1; next; };
+	    print " ...removed";
+	}
+	print "\n";
+    };
+}

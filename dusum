@@ -1,0 +1,21 @@
+#!/usr/bin/perl
+
+while (<>) {
+    ($size, $dir) = split;
+
+    if ($size =~ /(.*)(K|M|G|T)$/) {
+	$megs = $1;
+	if ($2 eq 'K') {
+	    $megs = 1;
+	} elsif ($2 eq 'M') {
+	    $factor = 1;
+	} elsif ($2 eq 'G') {
+	    $factor = 1000;
+	} elsif ($2 eq 'T') {
+	    $factor = 1000 * 1000;
+	} else {
+	    die "Unknown size: $2\n";
+	}
+	printf "%-10s%s\n", $1 * $factor, $dir;
+    }
+}

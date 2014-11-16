@@ -1,0 +1,52 @@
+#!/usr/bin/perl
+# $Id: rename_links.pl,v 1.2 2001/10/01 22:17:11 sam Exp $
+#
+# rename_links.pl
+#
+# Symbolic links matching the input pattern are renamed to the 
+# new name given on the command line.  Eg.
+#   
+#  rename_links.pl /n/hump/2/sam /home/support/sam .
+#  will find all symbolic links pointing to /n/hump/2/sam and 
+#  recreate them pointing to /home/support/sam.
+#  
+###########################################################################
+
+use Getopt::Std;
+use File::Find;
+
+getopts ('nh');
+
+if ( $#ARGV < 2 || $opt_h ) {
+    print "Usage: $0 <old_pattern> <new_pattern> directory\n";
+    print "       Finds all symlinks in directory matching old_pattern,\n";
+    print "       removes them and recreates them using new pattern.\n";
+    exit (1);
+}
+
+$OLD = shift;
+$NEW = shift;
+$DIR = shift;
+
+find ( \&wanted, $DIR );
+
+sub wanted {
+
+    -l and do {
+
+	my $link = readlink;
+
+	if ( $link =~ m=$OLD= ) {
+
+	    print "$_ -> $link matches old pattern\n";
+	    (my $newlink = $link) =~ s=$OLD=$NEW=;
+	    print "$_ -> $newlink\n";
+
+	    $opt_n || do {
+		unlink || die "Can't remove $_: $!\n";
+		symlink ($newlink, $_) || 
+		    die "Can't create symlink from $_ to $newlink\n";
+	    };
+	}
+    }
+}

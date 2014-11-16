@@ -1,0 +1,5 @@
+# Start vncserver (it forks)
+vncserver :10 -geometry 1280x1024
+
+# End session
+# vncserver -kill :10

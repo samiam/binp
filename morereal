@@ -1,0 +1,112 @@
+#!/bin/bash
+# $Id: morereal,v 1.6 1998/01/13 21:21:55 sam Exp sam $
+#
+# morereal - page through the real file
+#
+# Sam Napolitano
+# 11/22/1995
+#
+# This function grew out the fact that I would frequently find myself
+# typing "more `which file`".  Initially, morereal was a simple bash
+# function:
+# 
+#    type -p $@ && $PAGER `type -p $@`
+#
+# But it only looks at files; functions, builtins, keywords and aliases
+# would all be missed.  Hence the need for a new "morereal".
+#
+# Usage:
+#    morereal file ...
+# 
+# Notes:
+#  * Due to Bash's extra capabilities of the builtin 'type' command, 
+#    this was written in bash. 
+#  * The function looks at the current env.  Since child shells have
+#    different env than parent, you probably want to run it like:
+#
+#	source morereal file ...
+#
+#    That way, you'll catch any funcs, aliases, etc. that are defined
+#    in current shell.
+#
+
+
+atype=; allfiles=; ifs=; file=;
+
+case "$#" in
+	0)   cat << EOF 1>&2
+usage: $0 file ...
+	Page through each file using envar \$PAGER.  It's best to
+        source this file from the current shell.
+
+EOF
+        return;;
+esac
+
+# save current IFS and set to newline only
+#ifs=$IFS
+#IFS='	
+#'
+
+# Look at each file and each type per file.  There are two lists which
+# stay in sync.  $allfiles is set to the positional parameters.  It
+# lists all the paths to 'file' that we defined.  $atype is each
+# filetype per file in the path.
+#
+# The function type is the only type which could return more than one
+# line.  The declare -f will list the function.  Then we have to remove
+# it from the positional parameters.  I just shift until a } is seen.
+# This isn't syntactically correct, but will work in most cases.
+#
+for file
+do
+	echo ""
+	echo "ARG: ==> $file <=="
+
+	allfiles=`eval type -all $file 2\> /dev/null`
+	if [ $? -ne 0 ]; then
+	   echo "No such file!"
+	   continue
+#	else
+#	    set -- $allfiles
+	fi
+
+# Allfiles needs to be split based on newline and then just 
+# page through file for file type only
+	echo "Allfiles:$allfiles:"
+
+	# $1 looks like:     less is /usr/local/bin/less
+	# $atype looks like: file
+	echo -n :
+        type -all -type $file
+	for atype in `type -all -type $file`
+	do
+            case $atype in
+
+                 alias)    echo ${allfiles}
+			   ;;
+                 keyword)  echo ${allfiles}
+			   ;;
+                 function) echo ${allfiles}
+			   declare -f $file
+#			   until [ "${allfiles}" = "}" ]; 
+#		 	   do   
+#				shift; 
+#			   done
+			   ;;
+                 builtin)  echo ${allfiles}
+			   ;;
+                 file)     echo ${allfiles}	
+#			   $PAGER `echo ${allfiles} | sed "s=$file is \(.*\)=\1="`
+			   $PAGER `echo ${allfiles} | awk '{print $NF}'`
+			   ;;
+
+            esac
+#	    shift		# next file type - same file
+
+	done
+#	shift			# next file
+done
+#IFS="$ifs"			# restore previous IFS
+
+unset atype allfiles ifs file

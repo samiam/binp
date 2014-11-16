@@ -1,0 +1,1041 @@
+#!/usr/bin/perl 
+;####################################################################
+;# -*- perl -*-
+;#
+;# Linst
+;#   This program is very similar to lndir distributed with X11.
+;#   It makes a shawdow of symlink to the source directory, from
+;#   the destination directory.
+;#   
+;#   Sample usage:
+;#      linst -b /usr/appl/perl -d /usr/local bin lib
+;#
+;#   Type 'linst --help' for further help
+;#
+;#   Change the defaults in Package Setup, function SetGlobals.
+;#
+;####################################################################
+;#                                                                  #
+;#     Mainline                                                     #
+;#                                                                  #
+;####################################################################
+
+require 'pwd.pl';
+
+%cargs = &SetGlobals;		# set the defaults
+
+%cargs = &GetArguments(%cargs);	# get command line args
+
+%cargs = &SetOptions(%cargs);	# interpret cmd line args
+
+$cargs{'HELP'} && &Usage(%cargs);  # help if necessary
+
+&PrintArguments(%cargs) if $cargs{'VERBOSE'};	# show defaults
+
+&Continue(%cargs);              # ask before going on (don't comment out)
+
+&StartEngine(%cargs);		# the main engine
+
+exit 0;
+
+;#---------  End of Mainline   ----------------------------------------
+
+;######################################################################
+;#
+;#   Setup Package
+;#
+;#        The program's defaults are set.  
+;#
+;######################################################################
+package Setup;
+
+;#
+;# SetGlobals
+;#   Setup some global variables in an array that is passed around.
+;#
+sub main::SetGlobals {
+
+    local(%a) = ();
+
+    my $ARCH = `uname -p`; chop $ARCH;
+
+    #
+    # Public Defaults - Only change these
+    #
+    $a{'MODE'}     = 0755;            # octal perms. for dirs. created
+    $a{'VERBOSE'}  = 0;               # show what is happening
+    $a{'SUFFIX'}   = '~';             # backup suffix
+    $a{'DESTDIR'}  = "$ENV{'HOME'}/l/$ARCH";  # base of destdir to install in 
+                                      # (may be null, forces -d required)
+    $a{'RELATIVE'} = 0;               # relative links off
+    $a{'CLEAN'} = 0;                  # remove nothing
+    &SetPrivateGlobals;
+
+    return(%a);
+}
+
+;#  
+;# SetPrivateGlobals - don't change these
+;#
+sub SetPrivateGlobals {
+
+    local(%flags_noarg, %flags_arg) = ();
+
+   ($a{'PROGRAM'}) = ($0 =~ m:([^/]+)$:);  # name of program
+    $a{'DEBUG'}    = 0;
+    $a{'UID'}      = $>;
+    $a{'GID'}      = (split(/ /, $) ))[0]; # get first arg in list
+    $a{'ARGV'}     = \@ARGV;	      # keep ARGV around
+    
+    # A list of arguments that do not take arguments
+    #
+    %flags_noarg  = ('v', 'verbose', 
+		     'q', 'quiet', 
+		     'i', 'interactive',
+		     'h', 'help',
+		     'r', 'remove',
+		     'n', 'nodo',
+                     'l', 'relative',
+		     'c', 'clean');
+
+    # A list of arguments that do take arguments
+    #
+    %flags_arg    = ("u", "uid",
+		     "g", "gid",
+		     "s", "suffix",
+		     "b", "basedir",
+		     "d", "destdir");
+
+    $a{'FLAGS_NOARG'} = \%flags_noarg;      # keep pointer to array
+    $a{'FLAGS_ARG'}   = \%flags_arg;
+}
+
+
+;#---------------------------------------------------------------------
+;#
+;#   End of Setup Package
+;#
+;#---------------------------------------------------------------------
+;######################################################################
+;#
+;#   Arguments Package
+;#
+;#         Command line arguments are processed.
+;#
+;######################################################################
+package Arguments;
+
+;#
+;#  GetArguments
+;#    Process command line options, stopping at the first non-argument
+;#    i.e. one that doesn't begin with a dash or after the '--'.
+;#
+sub main::GetArguments {
+
+  local(%a) = @_;
+  local(@args) = @{$a{'ARGV'}};
+  local(%flags_noargs) = %{$a{'FLAGS_NOARG'}};
+  local(%flags_args)   = %{$a{'FLAGS_ARG'}};
+  local($myname) = $a{'PROGRAM'};  
+
+  @args = reverse(@args);	    # reverse before popping from end
+
+  SEEARGS:
+    while ($_ = pop(@args)) {
+
+      print "Processing arg: $_\n" if $a{'DEBUG'};
+      local($val, $letarg) = ();      # reset value
+      
+      if (! /^-/) {          # Are we at the end yet? (noflag b/g w/-) 
+	  push( @args, $_ ); # Yes, so return non-flag to args list
+	  last SEEARGS;      # break out of loop
+      } 
+
+      # look at each flag that does not require an argument
+      foreach $letarg ( keys %flags_noargs ) {
+        local($wordarg) = $flags_noargs{$letarg};
+	if ( defined ($val = &GetArg( 0, $letarg, $wordarg ))) {
+	    $a{$wordarg} = $val;
+	    next SEEARGS;
+	}
+      }
+
+      # look at each flag that does require an argument
+      foreach $letarg ( keys %flags_args ) {
+        local($wordarg) = $flags_args{$letarg};
+	if ( defined ($val = &GetArg( 1, $letarg, $wordarg ))) {
+	    $a{$wordarg} = $val;
+	    next SEEARGS;
+	}
+      }
+
+      # stop all argument processing
+      (&GetArg(0, "-", "")) && last SEEARGS;
+
+      print STDERR "$myname: Unknown option $_\n"; # give'em small help
+      $a{'help'} = 2;	
+    }
+
+  # everthing left on command line must be the sources
+  $a{'sources'} = \@args;	
+  return(%a);
+}
+
+;#
+;# GetArg - gets a command line argument.  Takes three parameters
+;#     boolean         - does arg. have a value?
+;#     character flag  - character argument (eg. -v)
+;#     string flag     - word argument (eg. --verbose)
+;#
+;# Returns true if argument exists (or value if arg. expected)
+;# Argument values cannot begin with a dash '-'.  
+;#
+sub GetArg {
+
+  local($argexpected, $chararg, $wordarg) = @_;
+  local( $temp );
+
+  # no argument found so return null
+  (! /^-$chararg$|^--$wordarg$/ ) && return ();
+
+  # Argument exists; were we expecting a value?
+  (! $argexpected) && return 1;	     # No, so return true
+
+  $temp = pop(@args);	                 # remove argument
+  (! defined($temp)) && goto ERROR;      # if null, exit
+  ($temp =~ /^-/) && goto ERROR;         # if begins with a -, exit
+  return( $temp );	                 # return the arg
+                       # A hack
+  ERROR: {
+      ($chararg && $wordarg) &&
+         die ("$myname: option -$chararg (--$wordarg) requires an argument\n");
+      ($chararg && !$wordarg) &&
+	 die ("$myname: option -$chararg needs an argument\n");
+      (!$chararg && $wordarg) &&
+	 die ("$myname: option --$wordarg needs an argument\n");
+  };
+}
+
+
+;#---------------------------------------------------------------------
+;#
+;#   End of Arguments Package
+;#
+;#---------------------------------------------------------------------
+;######################################################################
+;#
+;#   Options Package
+;#
+;#         Command line arguments are now parsed and interpreted.
+;#
+;######################################################################
+package Options;
+
+;#
+;# SetOptions
+;#   Make sure every option specified makes sense.
+;#   Convention is that program only pays attention to args in 
+;#   uppercase letters
+;#
+sub main::SetOptions {
+
+    local(%a) = @_;
+
+    # Setup options w/o args.  
+
+    # If they want to see help, don't bother looking at remaining args
+    exists $a{'help'} && do {
+	$a{'HELP'} = 1;                # long help
+        return( %a );
+    };
+
+    exists $a{'remove'} && ($a{'REMOVE'} = 1);
+    exists $a{'nodo'} && ($a{'NODO'} = 1);
+    exists $a{'quiet'} && undef $a{'VERBOSE'};  
+    exists $a{'verbose'} && ($a{'VERBOSE'} = 1);
+    exists $a{'interactive'} && do {    #  higher precedence than quiet
+	$a{'INTERACTIVE'} = 1;
+	$a{'VERBOSE'} = 1;
+    };
+    exists $a{'relative'} && ($a{'RELATIVE'} = 1);
+    exists $a{'clean'} && ($a{'CLEAN'} = 1);
+
+    # Setup options with args
+    exists $a{'suffix'} && ($a{'SUFFIX'} = $a{'suffix'});
+    exists $a{'uid'} && &FixUid( $a{'uid'} );
+    exists $a{'gid'} && &FixGid( $a{'gid'} );
+
+    # Always set these up
+    &FixBasedir;
+    &FixDestdir;
+
+    # Make sure their is at least one arg - if not, give light help
+    (! @{$a{'sources'}}) && do {
+	print "\nYou didn't specify any sources!\n";
+	$a{'HELP'} = 2;		        # short help
+    };
+
+    return( %a );
+}
+
+;#
+;# FixBasedir
+;#
+sub FixBasedir {
+
+    local($basedir);
+
+    # was it specified on command line?
+    if ( exists $a{'basedir'} ) {
+	$basedir = $a{'basedir'};
+    } else {
+	&main::initpwd;		# use current dir
+	$basedir = $ENV{"PWD"};
+    }
+
+    &main::IsPathAbsolute( $basedir ) ||
+	die "Base directory $basedir is not an absolute pathname\n";
+
+    print "Basedir $basedir\n" if $a{'DEBUG'};
+
+    $basedir = &main::cleandir($basedir);
+    ( -d $basedir ) ||
+	die "Base directory $basedir doesn't even exist!!\n";
+    $a{'BASEDIR'} = $basedir;
+}
+
+;#
+;# FixDestdir
+;#
+sub FixDestdir {
+
+  local($destdir);
+
+  if ( exists $a{'destdir'} ) {
+      $destdir = $a{'destdir'};
+  } elsif ($a{'DESTDIR'}) {     # use default only if non-null
+      $destdir = $a{'DESTDIR'};
+  } else {
+      die "A destination directory must be specified\n";
+  }
+
+  &main::IsPathAbsolute( $destdir ) || die
+      "Destination directory $destdir is not an absolute pathname\n";
+
+  print "Destination Dir: $destdir\n" if $a{'DEBUG'};
+
+  $destdir = &main::cleandir($destdir);
+  $a{'DESTDIR'} = $destdir;
+}
+
+;#
+;# FixUid
+;#   Takes a uid in either numeric or string format.
+;#   Will not set UID if "arg":
+;#        - is null (undefined)
+;#        - doesn't exist on the system
+;#        - equals their euid of process
+;#        - the current euid is not root (o)
+;#   Will set UID if:
+;#        - the euid is root
+;#  
+sub FixUid {
+
+    local($uid) = @_;
+    local($n_uid) = -1;		# define this variable a bogus uid
+    local($ceuid) = $>;
+
+    # if they're not root, and they are trying to use a diff uid (other
+    # than their own), well, it's just not going to happen.  Get the 
+    # current login name to show them what program will use.
+
+    if ( $ceuid != 0 ) {
+	$n_uid = (getpwuid($ceuid))[0];
+	print "Sorry, you're not root - using uid $ceuid ($n_uid)\n" 
+	    if $verbose;
+	return;
+    }
+
+    # If the uid wasn't specified on the command line, don't do anything
+    # Note: this shouldn't be true, but to be safe.
+    !defined($uid) && return;
+
+    # If the uid is a name, then convert it to a number.  If the uid
+    # isn't on the system (getpw* calls), then n_uid will be undefined.
+
+    if ( $uid =~ /\d+/ ) {
+	$n_uid = (getpwuid($uid))[2];   
+    } else {
+	$n_uid = (getpwnam($uid))[2];
+    }
+
+    # if undefined, then it's not on the system
+    if ( ! defined($n_uid) ) {
+	$n_uid = (getpwuid($ceuid))[0];
+	print "No such uid $uid - using uid $ceuid ($n_uid)\n" if $verbose;
+	return;
+    }
+    
+    # If the uid is their own, well, save an assignment
+    ($ceuid == $n_uid) && return;
+
+    # At this point, we know the uid exists on the system, so if they're
+    # root, they can have fun.
+    ($ceuid == 0) && ($a{'UID'} = $n_uid);
+}
+
+;#
+;# FixGid
+;#   Takes a gid (numeric or string).
+;#   Will not set the gid if any one the following is true:
+;#        - the gid is null (undefined)
+;#        - the gid doesn't exist on the system
+;#        - the gid equals the egid
+;#        - the euid is not root and euid isn't a member of the group gid 
+;#   Returns the gid (numeric) if any one the following is true:
+;#        - the euid is root
+;#        - the euid is not root and euid is a member of the group gid
+;#
+sub FixGid {
+
+    local($gid) = @_;
+    local($n_gid) = -1;		# make this assignment bogus
+    local($cid) = $a{'GID'};
+    local($verbose) = $a{'VERBOSE'};
+
+    # If the gid wasn't specified on the command line, return null
+    # Shouldn't happen, but to be safe.
+    !defined($gid) && return;
+
+    # If the gid is a name, then convert it to a number.  If the gid
+    # isn't on the system (getgr* calls), then n_gid will be undefined.
+
+    if ( $gid =~ /\d+/ ) {
+	$n_gid = (getgrgid($gid))[2];
+    } else {
+	$n_gid = (getgrnam($gid))[2];
+    }
+
+    # if undefined, then it's not on the system
+    if ( !defined($n_gid) ) {
+
+	local($name_gid) = (getgrgid($cid))[0];
+	print "No such gid $gid - using gid $cid ($name_gid).\n" if $verbose;
+	return;
+    }
+    
+    # at this point, we know gid is on the system
+   
+    ($cid == $n_gid) && return;          # gid is their own
+    if ($> == 0) {		         # they're root, they're cool
+	$a{'GID'} = $n_gid;
+	return;
+    }
+
+    # if they're not root, and they are trying to use a diff gid in 
+    # which they don't belong, well, it's just not going to happen.
+
+    if ( grep( /$n_gid/, split( / /, $) )) ) {
+	$a{'GID'} = $n_gid;		# they must belong to that group
+	return;
+    }
+
+    local($name_bad_gid) = (getgrgid($n_gid))[0];
+    local($name_cur_gid) = (getgrgid($cid))[0];
+    
+    if ($verbose) {
+	print "Sorry you are not a member of the group ";
+	print "$n_gid ($name_bad_gid) - using $cid ($name_cur_gid)\n";
+    }
+}
+
+
+;#---------------------------------------------------------------------
+;#
+;#   End of Options Package
+;#
+;#---------------------------------------------------------------------
+;######################################################################
+;#
+;#   Help Package
+;#
+;#         Defines the usage of the program.
+;#
+;######################################################################
+package Help;
+
+;#
+;# Usage - help for the program
+;#
+sub main::Usage {
+
+  local(%a) = @_;
+  local($myname) = $a{'PROGRAM'};
+  local($suffix) = $a{'SUFFIX'};
+  local($destdir) = $a{'DESTDIR'};
+
+  &UsageShort if ($a{'HELP'} != 1);
+  &UsageLong;
+}
+
+;#
+;# UsageShort
+;#
+sub UsageShort {
+
+  print <<"EOT";
+
+Usage: $myname [-hvqirnugmsdb] [--help] [--verbose] [--quiet] [--interactive]
+               [--remove] [--nodo] [--relative] [--clean] 
+               [--uid uid] [--gid gid] [--suffix suffix] 
+               [--destdir dir] [--basedir dir] 
+               sources
+EOT
+    exit 0;
+}
+
+;#
+;# UsageLong
+;#
+sub UsageLong {
+
+  print <<"EOT";
+
+Usage: $myname [options] sources
+
+  (-h | --help)            this help
+  (-v | --verbose)         verbose - errors, warning, etc.
+  (-q | --quiet)           be silent
+  (-i | --interactive)     confirm before beginning (implies -v)
+  (-r | --remove)          remove files instead of backing them up 
+  (-n | --nodo)            show what will happen, but don't execute it
+  (-l | --relative)        create relative symbolic links instead of full path
+  (-c | --clean)           remove installed links based on sources
+
+  (-u | --uid) uid         set user id
+  (-g | --gid) gid         set group id         
+  (-s | --suffix) suffix   backup suffix        
+  (-b | --basedir) dir     base directory for sources
+  (-d | --destdir) dir     destination directory
+  (--)                     end all option processing
+
+$myname is very similar to 'lndir' distributed with X11.  It creates 
+symbolic links for each file in the source dir, from the destination
+dir to the source dir.
+
+Options:
+--------
+
+  -r removes existing files (links) instead of backing them up
+  -n no execution mode; commands are printed, but not executed
+  -- end all option processing.  Remaining arguments are considered
+     sources.
+  -s suffix  backup suffix for renaming old links          Default: $suffix
+  -u uid  A numeric or string user id.  Only superuser can use this option.
+          The uid must exist on the current system.  Sets uid of symlink
+          created.
+          Default: effective user id
+  -g gid  A numeric or string group id.  If you belong to the group specified,
+          it will be used.  The gid must exist on the current system.  Sets
+          gid of symlink created.
+          Default: current effective group id 
+
+  The following two options require absolute pathnames.  A trailing slash (/)
+  is ignored.
+
+  -b dir  Base directory.  All source directories (that are not absolute 
+          pathnames) will be prepended with this directory name.
+          Default:  current working directory as printed by 'pwd'
+  -d dir  Destination directory where all links will be created from
+          Default:  $destdir
+
+Examples:
+---------
+
+    \$ ls /usr/appl/perl
+    bin lib include dist man
+    \$ pwd
+    /usr/appl/perl
+    \$ $myname -d /usr/local bin lib include /usr/appl/perl/man
+    \$ $myname -d /usr/local -b /usr/appl/perl bin lib include man
+    \$ $myname -b /usr/appl/perl -- bin lib include man
+    \$ $myname bin lib include man
+
+    All of the above are equivalent.  In the next example, both
+    directories and files are specified.
+
+    \$ $myname -b /usr/appl/perl bin file1 file2
+ 
+Notes:
+------
+
+Newly created directories use the current umask value.
+
+All sources should be in the current directory.  Specifying relative
+filenames using . or .. is unwise (but should work).
+
+You can specify source directories that are greater than one level deep
+with respect to the basedir, but the behaviour may not be what you expect.
+
+  $myname -d /usr/local -b /usr/appl/perl sparc-sun-solaris2/bin
+
+In the above example, $myname will not link files to the
+/usr/appl/perl/sparc-sun-solaris2/bin directory from the
+/usr/local/sparc-sun-solaris2/bin but instead will link them to the 
+/usr/appl/perl/sparc-sun-solaris2/bin directory from the
+/usr/local/bin directory.  Some users may consider this a feature.
+
+File types that include directories, regular files, or symlinks are linked.
+Other file types will produce an error.
+
+No attempt is made to avoid infinite loops.
+
+It needs it's own manual page.
+
+Authors:
+--------
+
+Matt Liggett wrote the original version.
+Sam Napolitano made it recursive and added many of the options.
+
+EOT
+   exit 0;
+}
+
+
+;#---------------------------------------------------------------------
+;#
+;#   End of Help Package
+;#
+;#---------------------------------------------------------------------
+;######################################################################
+;#
+;#   Print Package
+;#
+;#         Prints the arguments.
+;#
+;######################################################################
+package Print;
+
+;#
+;# PrintArguments
+;#   Show's what the settings are after everything has been parsed.
+;#   Could use some work.
+;#
+sub main::PrintArguments {
+
+    local(%a) = @_;
+    local(%flags_noarg) = %{$a{'FLAGS_NOARG'}};
+    local(%flags_arg)   = %{$a{'FLAGS_ARG'}};
+    local($arg, $key);
+
+    print  "\n";
+    printf "\$ %s %s\n", $a{'PROGRAM'}, join(' ', @ARGV);
+    print  "\n";
+    print  "------- Flag......... Argument  -----------\n\n";
+
+    $~ = ARGSOUT;
+    format ARGSOUT =
+@>>>>>>>>>>> (-@) @<< @<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+$wordarg, $letterarg, "...", $valword
+.    
+
+    foreach $letterarg (sort keys %flags_noarg) {
+
+	$wordarg = $flags_noarg{$letterarg};
+	$wordarg =~ tr/a-z/A-Z/;
+	$valword = ($a{$wordarg} ? "True" : "False");
+	write;
+    }
+
+    foreach $letterarg (sort keys %flags_arg) {
+
+	$wordarg = $flags_arg{$letterarg};
+	$wordarg =~ tr/a-z/A-Z/;
+	$valword = $a{$wordarg};
+	write 
+    }
+
+    if ( $a{'DEBUG'} ) {
+	foreach (sort keys %a) {
+	    printf ("Argument: %-20s Value: %-20s\n", $_, $a{$_})
+		unless ($key eq 'sources');
+	}
+    }
+
+#    print "\n";
+#    print "---- Source directories/files to link -----\n\n";
+#    foreach $file (@{$a{'sources'}}) {
+#	print "  $file\n";
+#    }
+    print "\n";
+
+}
+
+
+;#---------------------------------------------------------------------
+;#
+;#   End of Print Package
+;#
+;#---------------------------------------------------------------------
+;######################################################################
+;#
+;#   Continue Package
+;#
+;#         Finds out if the user wishes to continue with the program.
+;#
+;######################################################################
+package Continue;
+
+;#
+;# Continue
+;#   Program exits if they don't want to
+;#
+sub main::Continue {
+
+  local(%a) = @_;
+
+  $| = 1;
+                                         # Ask before going on
+  if ($a{'INTERACTIVE'}) {
+
+      print "Do you wish to continue? [y] ";
+      $_ = <STDIN>;
+      (! /^(Y|y|\n)/) && do {
+	  print "Okey dokey, exiting...\n";
+	  exit 1;
+      };
+  }
+
+                                        # see if toplevel destdir exists
+  local($destdir) = $a{'DESTDIR'};
+  if (! -d $destdir) {
+
+      # If they are not interactive, just exit
+      if (! $a{'INTERACTIVE'}) {
+	  print "Destination directory $destdir doesn't exist!\n";
+	  exit 1;
+      }
+
+      # If they are interactive, prompt them to create directory
+      print "Destination directory $destdir doesn't exist.  Create? [y] ";
+      $_ = <STDIN>;
+
+      if (/^(Y|y|\n)/) {
+	  (mkdir $destdir, $a{'MODE'}) || die "Couldn't make $destdir $!\n";
+      } else {
+	  print "Okey dokey...option '--nodo (-n)' in effect.\n";
+	  $a{'NODO'} = 1;
+      }
+  }
+}
+
+
+;#---------------------------------------------------------------------
+;#
+;#   End of Continue Package
+;#
+;#---------------------------------------------------------------------
+;######################################################################
+;#
+;#   Engine Package
+;#
+;#        This is the meat of the program.  After all the setup
+;#        is done, this package will create the links and dirs.
+;#
+;######################################################################
+package Engine;
+
+;#
+;# StartEngine
+;#    Goes through each of the sources specified on the command line
+;#    and links each one.
+;#
+sub main::StartEngine {
+
+    local(%a) = @_;
+    local($destdir) = $a{'DESTDIR'};
+    local($src, $tsrc, $newdir);
+ 
+    # Add the base dir to each unqualified file, and then pass the 
+    # destdir/basename as the destination and the srcdir/basename as src
+
+    foreach $tsrc (@{$a{'sources'}}) {
+
+	# is it an absolute path?
+	&main::IsPathAbsolute($tsrc) || ($tsrc = $a{'BASEDIR'} . "/" . $tsrc);
+	$src = &main::cleandir($tsrc);
+
+	# Find filename and create destination
+	local($file) = &Basename($src);
+	&Engine( $src, "$destdir/$file" );
+    }
+}
+
+;#
+;# Engine
+;#    If the source file doesn't exist, stop
+;#    If the source is a file or link, link to it.
+;#    If the source is a directory, get all the sources in the directory
+;#    can call Engine recursively for each src..
+;#    Else the file is something that isn't going to be linked to - exit.
+;#   
+sub Engine {
+
+    local($Src, $Dest) = @_;
+    local(@srcfiles) = ();
+
+    print "Src: $Src Dest: $Dest\n" if $a{'DEBUG'};
+
+    (! -e $Src) && die "File $Src doesn't exist!\n";
+
+    if ((-l $Src) || (-f $Src)) {
+	if ($Src eq $Dest) {
+	    print "Unable to link to same file: $Src, $Dest: skipping\n";
+	    return;
+	}
+	if ($a{'RELATIVE'}) {
+	    &main::chdir(&Dirname($Dest)) unless $a{'NODO'};
+	    linkfile(&relativeSource($Src, $Dest), $Dest);
+	} else {
+	    linkfile($Src, $Dest);
+	}
+	return;
+    } 
+
+    elsif ( -d $Src ) {                          # create dest. dir
+	print "Making directory $Dest...\n" if $a{'DEBUG'};
+
+	# ignore error that dir already exists
+	if ( ! $a{'NODO'} ) {
+	    mkdir( $Dest, $a{'MODE'} ) or do {
+		die "Cannot mkdir($Dest, $a{'MODE'}): $!\n" if ($! != 17);
+	    };
+	}
+
+	@srcfiles = &GetSrcFiles($Src);	         # get src files
+
+	foreach $file (@srcfiles) {
+	    &Engine( "$Src/$file", "$Dest/$file" );
+	}
+    }                   # a file type I'm not prepared to deal with
+    else {
+	die "Don't know how to deal with file $Src\n";
+    }
+}
+
+;#
+;# backup
+;#
+sub backup {
+
+    local($file) = @_;
+    my ( $lk );
+
+    # Do not backup dirs, only files and symlinks
+
+    if ( ($lk = -l $file) || -f $file ) {
+
+      # Clean takes precedence over removal of backup files
+      if ( $a{'CLEAN'} )
+      {
+	  $a{'VERBOSE'} &&
+	      printf STDERR "Deleting %s %s\n", $lk ? "link" : "file", $file;
+
+
+	  !$a{'NODO'} &&
+	      (unlink $file || &exiterr( "Couldn't delete $file $!\n", 2 ));
+      } 
+      elsif ( $a{'REMOVE'} ) 
+      {
+	  $a{'VERBOSE'} &&
+	      printf STDERR "Removing %s %s\n", $lk ? "link" : "file", $file;
+
+	  !$a{'NODO'} &&
+	      (unlink $file || &exiterr( "Couldn't remove $file $!\n", 2 ));
+      } 
+      else {
+	  local($suffix) = $a{'SUFFIX'};
+	  local($error)  = $a{'NODO'};
+
+	  printf(STDERR "Backing up $file --> $file$suffix\n") 
+	      if $a{'VERBOSE'};
+	  $error || ($error = rename($file, "$file$suffix"));
+	  $error || &exiterr("Backup of $file could not be created. $!\n", 2);
+      }
+  }
+}			
+
+;#
+;# relativeSource - compute source files using ".." instead of full path
+;#
+sub relativeSource {
+    my ($src, $dst) = @_;
+
+    my @dst_path = split('/', $dst);
+    my @src_path = split('/', $src);
+
+    shift @dst_path if ($dst =~ m:^/:);         # skip initial /
+    shift @src_path if ($src =~ m:^/:);
+
+    # The common components stripped
+    my @src_path_stripped = @src_path;
+    my @dst_path_stripped = @dst_path;
+
+    # Count how many path tokens are the same and remove them
+    my $i = 0;
+    foreach my $token (@dst_path) {
+	print "$i: token: $token dst: $dst_path[$i] src: $src_path[$i]\n" 
+	    if $a{'DEBUG'};
+
+	if ($token eq $src_path[$i]) {
+	    $i++;
+	    shift @src_path_stripped;
+	    shift @dst_path_stripped;
+	} else {
+	    last;
+	}
+    }
+
+    # Sanity
+    #if (@dst_path == $i) {
+    #	print "Error: cannot link same file: $src, $dst\n";
+    #	return;
+    #}
+
+    # With the common parent components stripped, count depth of dst. file
+    # Eg. depth(/man/man1/ali.1) => 2.  When depth = 0, then dst. file is
+    # in same dir. as source.
+    my $depth = @dst_path_stripped - 1;
+
+    # Assemble relative path (../..)
+    my $dots;
+    for (my $x = 0; $x < $depth; $x++) {
+	$dots .= "../";
+    }
+
+    # Append dots to source file
+    return ($dots . join('/', @src_path_stripped));
+}
+
+;#
+;# linkfile
+;#
+sub linkfile {
+    local($source, $dest) = @_;
+
+    # The hack - short circuit tests - logic is poor here
+    if ( $a{'CLEAN'} ) {
+	&backup($dest);
+	return;
+    }
+
+    printf(STDERR "$dest -> $source\n") if $a{'VERBOSE'};
+
+    # When in NODO and RELATIVE mode, don't bother with tests b/c
+    # dest. directories won't exist and there will be lots of errors.
+    if ($a{'NODO'} && $a{'RELATIVE'}) {
+	return;
+    }
+
+    if (! -e $source) {
+	&exiterr("$source not found.\n", 1);
+    }
+
+    # the _ saves a stat() - but only once.  Linking to symlinks is ok
+    if ((! -f _) && (! -l $source)) {	
+	&exiterr("$source is not a normal file.\n", 1);
+    }
+
+    if (( -f $dest) || ( -l $dest)) {
+	&backup($dest);
+    } elsif ( -e $dest)	{	# exists but not a regular file
+	&exiterr("$dest exists and is not a normal file.\n", 1);
+    }
+    symlink($source, $dest) unless $a{'NODO'};
+
+    # don't bother trying to skip this step; you'll only save a few secs.
+    # on *huge* directories.
+    chown( $a{'UID'}, $a{'GID'}, $dest ); 
+}
+
+;#
+;# Basename of a file
+;#
+sub Basename {
+
+    local($file) = @_;
+    $file =~ m:([^/]+)$:;
+    return $1;
+}
+
+;#
+;# Directory name of a file
+;#
+sub Dirname {
+
+    local($file) = @_;
+    $file =~ m:([^/]+)$:;
+    return $`;                   # includes trailing /
+}
+
+;#
+;# GetSrcFiles - read all files from dir, returning all entries
+;# except . and ..
+;#
+sub GetSrcFiles {
+
+    opendir( D, $_[0]) || die "Can't open $_[0] $!\n";
+    local(@files) = (grep(!/^\.$|^\.\.$/, readdir(D)));
+    closedir(D);
+    return(@files);
+}
+
+;#
+;# exiterr
+;#
+sub exiterr {
+    local($message, $code) = @_;
+    print(STDERR "$a{'PROGRAM'}: $message");
+    exit($code);	
+}			
+
+
+;#---------------------------------------------------------------------
+;#
+;#   End of Engine Package
+;#
+;#---------------------------------------------------------------------
+;######################################################################
+;#
+;#   Miscellaneous Package
+;#
+;#        Helper functions.
+;#
+;######################################################################
+package Miscellaneous;
+
+;#
+;# cleandir
+;#
+sub main::cleandir {
+    local($dirname) = @_;	# remember root (/)
+    chop($dirname) if (($dirname !~ m:^/$:) && ($dirname =~ m#/$#));
+    return($dirname);
+}
+
+;#
+;# IsPathAbsolute
+;#
+sub main::IsPathAbsolute {
+    local($path) = @_;
+    ($path =~ m:^/:) && return 1;
+    return '';
+}
+
+
+;#---------------------------------------------------------------------
+;#
+;#   End of Miscellaneous Package
+;#
+;#---------------------------------------------------------------------

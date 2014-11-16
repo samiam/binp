@@ -1,0 +1,20 @@
+#!/usr/bin/perl 
+
+if ( $0 =~ /dos2unix/ ) {
+    $dos = 1;
+} elsif ( $0 =~ /unix2dos/ ) {
+    $dos = 0;
+} else {
+    print STDERR "$0: Unknown invocation $0\n";
+    print STDERR "    Must be dos2unix or unix2dos\n";
+}
+
+while (<>) {
+   
+   if ($dos) {
+      s/\r\n$/\n/ ;
+   } else {
+      s/\n$/\r\n/ ;
+   }
+   print;
+}

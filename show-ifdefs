@@ -1,0 +1,23 @@
+#nawk '
+awk '
+BEGIN {
+        space = " | | | | | | | | | | | | | | | | | | |"
+        depth = 0 ;
+}
+
+/^#[\t ]*if/ {
+        print "\t", substr( space, 1, depth*2 )
+        print NR, "\t", substr( space, 1, depth*2 ), $0
+        depth += 1 ;
+}
+
+/^#[\t ]*el/ {
+        print NR, "\t", substr( space, 1, (depth-1)*2 ), $0
+}
+
+/^#[\t ]*en/ {
+        depth -= 1 ;
+        print NR, "\t", substr( space, 1, depth*2 ), $0
+        print "\t", substr( space, 1, depth*2 )
+}
+' "$@"

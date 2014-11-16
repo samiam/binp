@@ -1,0 +1,48 @@
+#!/usr/bin/perl
+# $Id: mvdist,v 1.1 1995/07/14 04:42:33 mliggett Exp $
+
+$basedir = '.';
+$dirname = 'dist';  # default
+
+while ($_ = shift) {
+  SWITCH: {
+      (/^-v$|^--verbose$/) && do {
+          $verbose++;
+          last;
+      };
+
+      (/^-b$|^--basedir$/) && do {
+          ($basedir = shift) || die("mvdist: -b needs an argument\n");
+         last;
+      };
+
+      (/^-h$|^--help$/) && do {
+          die("mvdist arguments:\n" .
+              " [ -h | --help ]            this help\n" .
+              " [ -v | --verbose ]         print everything I do\n" .
+              " [ -b dir | --basedir dir ] move files from _dir_\n" .
+              " [ newdir ]                 move files to newdir instead of '$dirname'\n");
+          last;
+      };
+
+      (/^-/) && do {
+          die("mvdist: Unknown option '$_'.  Try mvdist --help.\n");
+          last;
+      };
+
+      #default case: bare word
+      $dirname = $_;
+  }
+}
+
+opendir(D, $basedir);
+@files = (grep(!/^\.$|^\.\.$/, readdir(D)));
+closedir(D);
+print("Creating dir $basedir/$dirname...\n") if $verbose;
+mkdir("$basedir/$dirname", 07777) || die "mkdir($dirname): $!\n";
+foreach (@files) {
+    print("$basedir/$_ => $basedir/$dirname/$_\n") if $verbose;
+    rename("$basedir/$_", "$basedir/$dirname/$_");
+}
+
+
