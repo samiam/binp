@@ -1,0 +1,16 @@
+#!/bin/bash
+# Turn on/off dotfiles on Mac
+# http://ianlunn.co.uk/articles/quickly-showhide-hidden-files-mac-os-x-mavericks/
+
+case "$1" in
+  on)  defaults write com.apple.finder AppleShowAllFiles YES
+       killall Finder /System/Library/CoreServices/Finder.app
+       ;;
+ off)  defaults write com.apple.finder AppleShowAllFiles NO
+       killall Finder /System/Library/CoreServices/Finder.app
+       ;;
+   *)  echo "Usage: $0 on|off"
+       echo "Turn Mac dotfiles on/off in finder"
+       exit
+       ;;
+esac
