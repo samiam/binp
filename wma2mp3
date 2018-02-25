@@ -1,0 +1,20 @@
+#!/bin/sh
+
+if [ -z "$1" ]; then
+  echo "Usage: $0 file.wma"
+  echo "Convert file.wma to new file.mp3"
+  exit
+fi
+
+in="$1"
+
+# if file ext is .wma then strip and append .mp3
+# otherwise just append .mp3
+
+if [ ${in%%.wma} = $in ]; then
+  out=${1}.mp3		# .wma ext absent
+else
+  out=${1/.wma/.mp3}	# .wma ext exists
+fi
+
+avconv -ab 192k -i "${in}" "${out}"

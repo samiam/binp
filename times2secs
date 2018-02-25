@@ -1,0 +1,73 @@
+#!/usr/bin/ruby -s
+# Compare two dates or times and report delta between them
+
+require 'time.rb'
+
+def usage
+  puts <<EOF
+  Usage: #{$0} [options] [--] startTime endTime
+  Compute delta in seconds between two dates and/or times.
+  When date is absent and endTime < startTime, assume next day for endTime
+  Options:  -help  help
+            -str   print HH:MM:SS
+            -micro print microseconds
+            -test  run tests
+  Examples: #{$0} '2014/05/19 00:00:00.0' '2014/05/20 00:00:00.0' => 86400
+            #{$0} 00:00:00.0 01:00:00.0 => 3600
+            #{$0} -str 00:00:00.0 01:00:00.0 => 01:00:00
+            #{$0} 00:00:10 00:00:00 => 10
+EOF
+  exit
+end
+
+class Delta
+  def initialize(a, b)
+    @delta = (Time.parse(a) - Time.parse(b)).abs
+  end
+  def secs;     @delta.to_i;  end
+  def exact;    @delta;       end
+  def mins
+    seconds = secs % 60
+    minutes = (secs / 60) % 60
+    hours   = secs / (60 * 60)
+    sprintf("%02d:%02d:%02d", hours, minutes, seconds)
+  end
+end
+
+# Mainline
+usage if $help or ARGV.length < 2;
+delta = Delta.new(ARGV[0], ARGV[1])
+if $str
+  puts delta.mins
+elsif $micro
+  puts delta.exact
+else
+  puts delta.secs
+end
+
+exit unless $test
+
+require 'test/unit'
+class TestDelta < Test::Unit::TestCase
+  def test_secs
+    d = Delta.new('00:00:00.0', '00:00:05.0')
+    assert_equal(5, d.secs)
+    assert_equal(5.0, d.exact)
+    d = Delta.new('00:00:05.0', '00:00:00.0')
+    assert_equal(5, d.secs)
+    assert_equal(5.0, d.exact)
+    d = Delta.new('00:00:00.0', '00:01:00.0')
+    assert_equal(60, d.secs)
+    assert_equal(60.0, d.exact)
+    d = Delta.new('00:00:00.0', '01:00:00.0')
+    assert_equal(3600, d.secs)
+    assert_equal(3600.0, d.exact)
+  end
+
+  def test_day
+    d = Delta.new('2014/05/19 00:00:00.0', '2014/05/20 00:00:00.0')
+    assert_equal((3600 * 24).to_f, d.exact)
+    assert_equal(3600 * 24, d.secs)
+    assert_equal("24:00:00", d.mins)
+  end
+end

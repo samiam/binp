@@ -1,0 +1,23 @@
+#!/usr/bin/perl
+# http://perl-xml.sourceforge.net/faq/
+#
+# Use this script to "validate" xml file.
+#
+# Method 1:
+#   xmllint --valid --noout mlnorm.output
+# 
+# Method 2:
+#   Using output of P02...
+#   Remove duplicate "<?xml" declarations from file
+#   validate_xml.pl p02file.edited
+#
+# Use "30|" to take you to column 30 in vi
+# Use "30g" to take you to line 30 in vi
+# Use ":30 goto" to take you to byte 30 in vi
+
+use XML::Twig;
+
+my $twig=XML::Twig->new();    # create the twig
+$twig->parsefile( $ARGV[0]);  # build it
+my_process( $twig);           # use twig methods to process it
+$twig->print;

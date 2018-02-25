@@ -1,0 +1,55 @@
+#!/bin/bash
+# Start and stop emacs --daemon
+
+capture () {
+  echo "****************" >> /tmp/em.out
+  date >> /tmp/em.out
+  echo Args: $* >> /tmp/em.out
+  set >> /tmp/em.out
+  exit
+}
+
+running () {
+  emacsclient -e '(emacs-pid)' 2> /dev/null
+  return $?
+}
+
+pid () {
+  pid=$(emacsclient -e '(emacs-pid)' 2> /dev/null)
+  echo ${pid:-0}
+}
+
+start () {
+  pid=$(pid)
+  if [ $pid -gt 0 ]; then
+    echo "emacs --daemon running ($pid)"
+  else
+    user=$(id -u)
+    rm -f /tmp/emacs${user}/server
+    emacs --daemon
+  fi
+}
+
+stop () {
+  emacsclient -e '(kill-emacs)' 2> /dev/null
+  rm -f /tmp/emacs${user}/server
+}
+
+status () {
+  pid=$(pid)
+  if [ $pid -gt 0 ]; then
+    echo "emacs --daemon running ($pid)"
+  else
+    echo "emacs --daemon not running"
+  fi
+}
+
+trap "stop; exit" SIGHUP SIGINT SIGTERM
+
+case "$1" in
+  start)    start       ;;
+  stop)     stop        ;;
+  status)   status      ;;
+  pid)      echo `pid`  ;;
+  *)        echo "Usage: $0 [start|stop|status|pid]" ;;
+esac
