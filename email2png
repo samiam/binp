@@ -1,0 +1,44 @@
+#!/bin/bash
+#
+# email2png - given an email address, convert to a png image
+#
+
+if [ "$1" == "-b" ]
+then
+  shift
+  dashb="yes"
+else
+  dashb="no"
+fi
+
+
+if [ $# != 2 ]
+then
+  echo USAGE: email2png username@some.domain filename.png
+  exit
+fi
+
+txt=$1
+output=$2
+
+if ! echo $output | egrep -q '[.]png$'
+then
+  echo ERROR: Output file name must have the .png extension
+  echo
+  echo USAGE: email2png username@some.domain filename.png
+  exit
+fi
+
+
+if [ $dashb == "yes" ]
+then
+  convert -pointsize 16 -background transparent label:$txt $output
+else
+  #convert -pointsize 16 label:$txt -border 10 -tile /usr/local/lib/email_background.png -draw "color 0,0 reset" -tile pattern:gray0 -gravity center -annotate +0+0 $txt $output
+  #convert -pointsize 16 label:$txt -border 10 -tile email_background.png -draw "color 0,0 reset" -tile pattern:gray0 -gravity center -annotate +0+0 $txt $output
+  convert -pointsize 16 label:"$txt" -border 10 \
+          -tile email_background_blissrun.png \
+          -draw "color 0,0 reset" -tile pattern:gray0 -gravity center \
+           -annotate +0+0 "$txt" $output
+fi
+
